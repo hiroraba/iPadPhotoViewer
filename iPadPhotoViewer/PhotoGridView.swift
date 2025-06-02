@@ -19,8 +19,8 @@ struct PhotoGridView: View {
         NavigationView {
             ScrollView {
                 LazyVGrid(
-                    columns: [GridItem(.adaptive(minimum: cellSize), spacing: 10)],
-                    spacing: 10
+                    columns: [GridItem(.adaptive(minimum: cellSize), spacing: 5)],
+                    spacing: 5
                 ) {
                     ForEach(photoManager.photos.indices, id: \.self) { index in
                         let url = photoManager.photos[index]
@@ -32,7 +32,7 @@ struct PhotoGridView: View {
                         .buttonStyle(PlainButtonStyle())
                     }
                 }
-                .padding(10)
+                .padding(5)
             }
             .navigationTitle("写真一覧")
             .toolbar {

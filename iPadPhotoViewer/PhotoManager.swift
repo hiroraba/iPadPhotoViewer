@@ -9,31 +9,81 @@
 import SwiftUI
 import Combine
 import Photos
+import Foundation
 
-final class PhotoManager: ObservableObject {
+class PhotoManager: ObservableObject {
     @Published var photos: [URL] = []
-
+    
     private let fileManager = FileManager.default
-    private let docsDir: URL
-
+    
+    // ドキュメントディレクトリのURLを返すプロパティ
+    private var docsDir: URL {
+        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+    }
+    
     init() {
-        // ドキュメントディレクトリを取得
-        docsDir = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first!
         loadPhotos()
     }
-
-    /// ドキュメントディレクトリから画像ファイルを読み込み、photos 配列を更新する
+    
+    /// ドキュメントディレクトリ内の画像ファイルを「ファイル作成日時（追加順）」で読み込む
     func loadPhotos() {
-        do {
-            let allFiles = try fileManager.contentsOfDirectory(at: docsDir, includingPropertiesForKeys: nil)
-            // 画像として扱いたい拡張子をフィルタリング（必要に応じて追加）
-            photos = allFiles.filter {
-                let ext = $0.pathExtension.lowercased()
+        DispatchQueue.global(qos: .userInitiated).async {
+            let fm = FileManager.default
+            let resourceKeys: Set<URLResourceKey> = [.creationDateKey]
+            
+            // ドキュメントディレクトリ以下にある全ファイルを取得
+            guard let fileURLs = try? fm.contentsOfDirectory(at: self.docsDir,
+                                                             includingPropertiesForKeys: Array(resourceKeys),
+                                                             options: [.skipsHiddenFiles]) else {
+                DispatchQueue.main.async {
+                    self.photos = []
+                }
+                return
+            }
+            
+            // 画像ファイルのみフィルタ（必要に応じて拡張子を追加）
+            let imageURLs = fileURLs.filter { url in
+                let ext = url.pathExtension.lowercased()
                 return ext == "jpg" || ext == "jpeg" || ext == "png" || ext == "heic"
             }
+            
+            // URLごとに creationDate を取得してタプルにまとめる
+            let urlsWithDate: [(url: URL, date: Date)] = imageURLs.compactMap { url in
+                if let values = try? url.resourceValues(forKeys: [.creationDateKey]),
+                   let created = values.creationDate {
+                    return (url, created)
+                } else {
+                    // 日付情報が取れなければ、極端に昔の日付（表示順末尾）にしておく
+                    return (url, Date.distantPast)
+                }
+            }
+            
+            // creationDate の昇順（古いもの＝先に追加されたものが先頭）でソート
+            let sortedByDate = urlsWithDate.sorted { lhs, rhs in
+                lhs.date > rhs.date
+            }
+            
+            // URL の配列だけ取り出して Published プロパティにセット
+            let sortedURLs = sortedByDate.map { $0.url }
+            
+            DispatchQueue.main.async {
+                self.photos = sortedURLs
+            }
+        }
+    }
+    
+    /// ディスク上に保存するときに、正しい creationDate がつくようにする例
+    func importPhotoData(_ data: Data, fileExtension: String) -> URL? {
+        let filename = UUID().uuidString + "." + fileExtension
+        let destURL = docsDir.appendingPathComponent(filename)
+        do {
+            try data.write(to: destURL)
+            // iOSでは書き込み時点のファイル作成日時が自動で付くので、
+            // ここで特に修正しなくてもOK。ただし、日付を明示的に変更したい場合は下記例参照。
+            return destURL
         } catch {
-            print("📂 PhotoManager: ドキュメントディレクトリ読み込みエラー: \(error)")
-            photos = []
+            print("写真保存エラー: \(error)")
+            return nil
         }
     }
 }
